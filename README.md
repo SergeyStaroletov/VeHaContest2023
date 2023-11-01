@@ -10,3 +10,4 @@
 5. По завершении работы над задачей все закоммитить себе и сделать pull-request в оригинальный репозиторий
 https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork
 
+Если есть проблемы, пришлите результат в виде архива на serg_soft@mail.ru, я сам залью сюда
