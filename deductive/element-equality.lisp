@@ -23,31 +23,37 @@
         )
         0
         (if
-            (>=
+            (<
                 i
                 n
             )
-            1
-
             (if
                 (=
-                    (nth
-                        i a
-                    )
-                    (nth
-                        n a
-                    )
-                )
-                (element-equality
                     i
-                    (-
-                        n
-                        1
-                    )
-                    a
+                    n
                 )
-                0
+                1
+                (if
+                    (=
+                        (nth
+                            (- n 1) a
+                        )
+                        (nth
+                            n a
+                        )
+                    )
+                    (element-equality
+                        i
+                        (-
+                            n
+                            1
+                        )
+                        a
+                    )
+                    0
+                )
             )
+            1
         )
     )
 )
