@@ -1,0 +1,9 @@
+(start-proof-tree)
+(set-gag-mode nil)
+(brr t)
+(include-book "centaur/fty/top" :dir :system)
+(certify-book "element-equality" 1 t)
+:ubt :max
+(certify-book "element_equality-verification-condition-theory" 1 t)
+:ubt :max
+(certify-book "element_equality-verification-condition-1" 1 t)
