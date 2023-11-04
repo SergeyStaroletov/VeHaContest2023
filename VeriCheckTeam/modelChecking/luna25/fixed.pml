@@ -1,11 +1,10 @@
 #define QUEUE_SIZE 4
 #define TARGET_BIUS_ANGLE 5 // Угол, при котором манёвр считается завершенным и отправляются команды на выключение BIUS и ENGINE
 #define MAX_SKIP_COUNT 2 // Для оптимизации, максимальное число раундов, когда устройство может быть не готово к приёму/передаче.
+#define MAX_SKIP_COUNT_COMMAND 5
 
 #define NIL_bius 0 // передача нуля от выключенного bius
 
-// #define fair ([]<> (inc && last_ == 0))
-// []<> _last==0 && []<> _last==1
 
 inline clearChan(chanName) {
   do
@@ -29,6 +28,13 @@ inline clearChanAfterResetCommand(chanData, chanCommand) {
       clearChan(chanCommand);
     };
     :: else -> skip;
+  fi
+}
+
+inline countChanEmpty(chanName, skipVar) {
+  if
+    :: nempty(chanName) -> skipVar++;
+    :: empty(chanName) -> skip;
   fi
 }
 
@@ -82,6 +88,13 @@ active proctype BKU() {
       resetChanIfAroundLimit(ENGINE_DATA, ENGINE_COMMAND);
       resetChanIfAroundLimit(MODULE_DATA, MODULE_COMMAND);
 
+      if
+        ::BIUS_COMMAND ?? [reset] ||
+          ENGINE_COMMAND ?? [reset] ||
+          MODULE_COMMAND ?? [reset] -> goto finish;
+        ::else -> skip;
+      fi
+
       do
         :: MODULE_DATA ? [module_data] -> { MODULE_DATA ? module_data; printf("BKU: MODULE_DATA %e\n", module_data) };
         :: ENGINE_DATA ? [engine_data] -> { ENGINE_DATA ? engine_data; printf("BKU: ENGINE_DATA %e\n", engine_data) };
@@ -89,7 +102,7 @@ active proctype BKU() {
           BIUS_DATA ? bius_data;
           printf("MSC: angle %d\n", bius_data)
           if
-            :: bius_data == TARGET_BIUS_ANGLE -> {
+            :: (bius_data == TARGET_BIUS_ANGLE) && (simulationState == 1) -> {
               ENGINE_COMMAND ! disable_engine;
               BIUS_COMMAND ! disable_bius;
               simulationState = 2;
@@ -130,7 +143,7 @@ active proctype BIUS() {
   bool enable = false;
   byte angle = 0;
   byte skipCount = 0;
-  byte skipCount2 = 0;
+  byte skipCountCommand = 0;
 
   do
   :: atomic {
@@ -138,19 +151,12 @@ active proctype BIUS() {
 
     clearChanAfterResetCommand(BIUS_DATA, BIUS_COMMAND);
 
-// TODO: Вот тут вот случается цикл по последнему ::true, и команды не обрабатываются НИКОГДА.
-// Нужно либо найти как тут прописывают Fairness, либо добавить какой нибудь детерминизм в приём команд.
-// Можно спросить в тг как fairness прописать. (это в нусмв было чтоб явно указать, что цикл не вечный)
-// То есть у нас приоритета приёма команд/отправки данных нет, как и писали в тг, но нужно всё равно, чтоб команды когда то обработались, а не сидели вечно
     if
-      :: BIUS_COMMAND ? [enable_bius] -> {BIUS_COMMAND ? enable_bius; enable = true; isBiusEnabled = true; skipCount = 0; skipCount2 = 0}
-      :: BIUS_COMMAND ? [disable_bius] -> {BIUS_COMMAND ? disable_bius; enable = false; isBiusEnabled = false; skipCount = 0; skipCount2 = 0}
+      :: BIUS_COMMAND ? [enable_bius] -> {BIUS_COMMAND ? enable_bius; enable = true; isBiusEnabled = true; skipCount = 0; skipCountCommand = 0}
+      :: BIUS_COMMAND ? [disable_bius] -> {BIUS_COMMAND ? disable_bius; enable = false; isBiusEnabled = false; skipCount = 0; skipCountCommand = 0}
       :: (skipCount < MAX_SKIP_COUNT) -> skipCount++;
-      :: (skipCount2 < 2) -> {
-        if
-          :: BIUS_COMMAND ? [enable_bius] || BIUS_COMMAND ? [disable_bius] -> skipCount2++;
-          :: else -> skip;
-        fi
+      :: (skipCountCommand < MAX_SKIP_COUNT_COMMAND) -> {
+        countChanEmpty(BIUS_COMMAND, skipCountCommand)
         skipCount = 0;
         if
           :: enable -> {
@@ -171,7 +177,7 @@ active proctype BIUS() {
 active proctype ENGINE() {
   bool enable = false;
   byte skipCount = 0;
-  byte skipCount2 = 0;
+  byte skipCountCommand = 0;
 
   do
   :: atomic {
@@ -180,17 +186,13 @@ active proctype ENGINE() {
     clearChanAfterResetCommand(ENGINE_DATA, ENGINE_COMMAND);
 
     if
-      :: ENGINE_COMMAND ? [disable_engine] -> { ENGINE_COMMAND ? disable_engine; enable = false; isEngineEnabled = false; skipCount = 0; skipCount2 = 0;};
-      :: ENGINE_COMMAND ? [enable_engine] -> { ENGINE_COMMAND ? enable_engine; enable = true; isEngineEnabled = true; skipCount = 0; skipCount2 = 0;};
-      :: skipCount2 < 2 && enable -> {
+      :: ENGINE_COMMAND ? [disable_engine] -> { ENGINE_COMMAND ? disable_engine; enable = false; isEngineEnabled = false; skipCount = 0; skipCountCommand = 0;};
+      :: ENGINE_COMMAND ? [enable_engine] -> { ENGINE_COMMAND ? enable_engine; enable = true; isEngineEnabled = true; skipCount = 0; skipCountCommand = 0;};
+      :: enable && (skipCountCommand < MAX_SKIP_COUNT_COMMAND) -> {
+        countChanEmpty(ENGINE_COMMAND, skipCountCommand)
         if
           :: true -> ENGINE_DATA ! 1; skipCount = 0;
           :: (skipCount < MAX_SKIP_COUNT) -> skipCount++;
-        fi
-
-        if
-          :: ENGINE_COMMAND ? [enable_engine] || ENGINE_COMMAND ? [disable_engine] -> skipCount2++;
-          :: else -> skip;
         fi
       };
       :: else -> skip;
@@ -220,9 +222,8 @@ active proctype MODULE() {
 // Есть шанс, что если мы начнём манёвр, то мы его корректно закончим
 ltl p1 { ((simulationState == 1) -> <> (simulationState == 3 && !isEngineEnabled && !isBiusEnabled)) };
 
-// Но не ВСЕГДА (верификация завершается ошибкой с контрпримером)
+// ВСЕГДА если мы начнем маневр, то мы его корректно закончим
 ltl p2 { [] ((simulationState == 1) -> <> (simulationState == 3 && !isEngineEnabled && !isBiusEnabled)) };
 
-// Всегда если команда на включение BIUS была отправлена, то он включится.
-// Тот самый баг из описания. Демонстрирует как команда reset перебивает команду enable_bius
+// Всегда если команда на включение BIUS была отправлена, то он включится
 ltl p3 { [] ((isBiusEnableCommandSend && simulationState == 1) -> <> isBiusEnabled) };
