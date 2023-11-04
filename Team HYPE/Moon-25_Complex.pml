@@ -4,7 +4,7 @@
 
 int time = 0;                           // Time flow valiable       
 int who_is_active[4] = {0, 0, 0, 0};    // Round-Robin controller
-int random_break = 0;
+int random_break = 0;                   // Time moment of random breaking of BIUS
 // :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 
@@ -75,7 +75,7 @@ active proctype BKU() {
                 :: Max_emergency_reboot == 1 && BIUS_working == 1 -> {
                     to_Engine ! 1;
                 }
-                :: Selfcared == 1 && BIUS_working == 0 ->{
+                :: Selfcared == 1 && BIUS_working == 0 ->{ // fixing random breaking
                     to_Engine ! 0;
                 }
                 :: else -> {skip;}
@@ -224,8 +224,8 @@ active proctype BIUS() {
                         int i;
                         select(i:1 .. 2)
                         if 
-                        :: i == 1 -> {from_BIUS ! (Orbital_speed/ MOON_RADIUS);};
-                        :: else -> {from_BIUS ! BROKEN_VALUE}
+                        :: i == 1 -> {from_BIUS ! (Orbital_speed/ MOON_RADIUS);}; // good data sended
+                        :: else -> {from_BIUS ! BROKEN_VALUE} // wrong data sended
                         fi
                     }
                     :: else -> {
@@ -373,7 +373,7 @@ ltl success{<>(Engine_work == BIUS_working && time == UNIVERSE_CRASH_TIME)};
 
 init { // Initializing round-robin process
     who_is_active[0] = 1;
-    select(random_break : LANDING_TIME .. LANDING_TIME + 15); // In pre
+    select(random_break : LANDING_TIME .. LANDING_TIME + 15); // choosing moment of random breaking
     if
         :: random_break == LANDING_TIME -> {random_break = 0;};
         :: else -> {skip;}
