@@ -81,26 +81,10 @@ active proctype bius() {
                 }
                 :: command == reset_bius -> {
                     byte data;
-                    printf("reset bius")
-                    // isBiusEnabled = false
-                    do
-                        ::(bius_command ? [command]) -> bius_command ? command;
-                        ::!(bius_command ? [command]) -> {
-                            printf("Bius command clear");
-                            break
-                        }
-                    od
                     do 
                         ::(bku_data ? [data]) -> bku_data ? data;
                         ::!(bius_command ? [command]) -> break;
                     od
-                    // do 
-                    //      ::(bius_data ? [data]) -> bius_data ? data;
-                    //      ::!(bius_data ? [data]) -> {
-                    //         printf("Bius data clear");
-                    //         break
-                    //     }
-                    // od
                 }
             fi
         }
