@@ -24,5 +24,5 @@
 
 ### Images
 
-[logo]: https://github.com/danianmercado/VeHaContest2023/tree/main/5140904-20202/model-checking-luna25/example.png "ISPIN"
+![Screenshot](https://github.com/danianmercado/VeHaContest2023/tree/main/5140904-20202/model-checking-luna25/example.png)
 
