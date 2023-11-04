@@ -1,4 +1,4 @@
-#define queueSize 16
+#define queueSize 4
 #define targetBiusAngle 5
 #define NIL_bius 0 // передача нуля от выключенного bius
 
@@ -51,6 +51,8 @@ chan MODULE_COMMAND = [queueSize] of { mtype };
 bool isEngineEnabled = false;
 bool isBiusEnabled = false;
 
+bool isBugFound = false;
+
 active proctype ROUNDROBIN() {
   do
   :: atomic {
@@ -96,13 +98,19 @@ active proctype BKU() {
 
       // Переход на эллиптическую орбиту
       if
-        :: simulationState == 0 -> {
+        :: simulationState == 0 -> START: {
           printf("START LANDING")
           simulationState = 1;
           BIUS_COMMAND ! enable_bius;
           ENGINE_COMMAND ! enable_engine;
         }
         :: true -> skip;
+        progress: { // TODO: возможно плохая идея
+          if
+            ::simulationState == 0 -> goto START
+            else -> skip;
+          fi
+        };
       fi
 
       // Переход на эллиптическую орбиту завершён
@@ -126,20 +134,17 @@ active proctype BIUS() {
   :: atomic {
     currentTurn ? bius -> { printf("BIUS\n"); }
 
+    if
+      :: BIUS_DATA ?? [reset] && BIUS_DATA ?? [enable_bius] -> { isBugFound = true };
+      :: else -> skip;
+    fi
+
     clearChanAfterResetCommand(BIUS_DATA, BIUS_COMMAND);
-    // if
-    //   :: BIUS_COMMAND ?? [reset] -> {
-    //     BIUS_COMMAND ?? reset;
-    //     clearChan(BIUS_DATA);
-    //     clearChan(BIUS_COMMAND);
-    //   };
-    //   :: else -> skip;
-    // fi
 
     if
       :: BIUS_COMMAND ? enable_bius -> { enable = true; isBiusEnabled = true; }
       :: BIUS_COMMAND ? disable_bius -> { enable = false; isBiusEnabled = false; }
-      :: true -> printf("BIUS: SKIP\n");
+      // :: true -> printf("BIUS: SKIP\n"); // TODO: fix, через эту штуку вечный цикл случается, надо сделать не :: true, а skipCount < MAX_SKIP_COUNT
       :: true -> {
         if 
           :: enable -> {
@@ -196,3 +201,8 @@ active proctype MODULE() {
     }
   od
 }
+
+ltl p1 { <> [] (simulationState == 3) };
+
+// TODO: написать условие, чтоб найти именно наш баг: случится ресет который потрёт команду на запуск
+ltl p2 { []<> !isBugFound }
