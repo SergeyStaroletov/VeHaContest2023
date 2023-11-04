@@ -1,6 +1,6 @@
 #define QUEUE_SIZE 4
 #define TARGET_BIUS_ANGLE 5 // Угол, при котором манёвр считается завершенным и отправляются команды на выключение BIUS и ENGINE 
-#define MAX_SKIP_COUNT 10 // Для оптимизации, максимальное число раундов, когда устройство может быть не готово к приёму/передаче.
+#define MAX_SKIP_COUNT 2 // Для оптимизации, максимальное число раундов, когда устройство может быть не готово к приёму/передаче.
 
 #define NIL_bius 0 // передача нуля от выключенного bius
 
@@ -78,6 +78,13 @@ active proctype BKU() {
       resetChanIfAroundLimit(BIUS_DATA, BIUS_COMMAND);
       resetChanIfAroundLimit(ENGINE_DATA, ENGINE_COMMAND);
       resetChanIfAroundLimit(MODULE_DATA, MODULE_COMMAND);
+
+      if
+        ::BIUS_COMMAND ?? [reset] || 
+          ENGINE_COMMAND ?? [reset] || 
+          MODULE_COMMAND ?? [reset] -> goto finish;
+        ::else -> skip;
+      fi
 
       if
         :: MODULE_DATA ? [module_data] -> { MODULE_DATA ? module_data; printf("BKU: MODULE_DATA %e\n", module_data) };
