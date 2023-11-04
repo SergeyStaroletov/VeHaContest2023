@@ -152,7 +152,14 @@ active proctype BIUS() {
     clearChanAfterResetCommand(BIUS_DATA, BIUS_COMMAND);
 
     if
-      :: BIUS_COMMAND ? [enable_bius] -> {BIUS_COMMAND ? enable_bius; enable = true; isBiusEnabled = true; skipCount = 0; skipCountCommand = 0}
+      :: BIUS_COMMAND ? [enable_bius] -> {
+        BIUS_COMMAND ? enable_bius;
+        enable = true;
+        isBiusEnabled = true;
+        skipCount = 0;
+        skipCountCommand = 0;
+        isBiusEnableCommandSend = false
+      }
       :: BIUS_COMMAND ? [disable_bius] -> {BIUS_COMMAND ? disable_bius; enable = false; isBiusEnabled = false; skipCount = 0; skipCountCommand = 0}
       :: (skipCount < MAX_SKIP_COUNT) -> skipCount++;
       :: (skipCountCommand < MAX_SKIP_COUNT_COMMAND) -> {
@@ -226,4 +233,4 @@ ltl p1 { ((simulationState == 1) -> <> (simulationState == 3 && !isEngineEnabled
 ltl p2 { [] ((simulationState == 1) -> <> (simulationState == 3 && !isEngineEnabled && !isBiusEnabled)) };
 
 // Всегда если команда на включение BIUS была отправлена, то он включится
-ltl p3 { [] ((isBiusEnableCommandSend && simulationState == 1) -> <> isBiusEnabled) };
+ltl p3 { [] (isBiusEnableCommandSend -> <> isBiusEnabled) };
