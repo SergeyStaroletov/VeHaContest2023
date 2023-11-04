@@ -52,18 +52,18 @@
                                   j
                                   1
                               )
-                            a
+                              a
                             )
 			  )
 		        )
                         0
                         (element-equality
-                           i
-                           (-
-                              j
-                              1
-                           )
-                           a
+                             i
+                             (-
+                                 j
+                                 1
+                             )
+                             a
                          )
                      )
                 )
