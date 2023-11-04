@@ -1,8 +1,10 @@
 #define LANDING_TIME 10                  // Time to changing round orbit to eliptic
 #define UNIVERSE_CRASH_TIME 50           // Constant time for ending simulation
+#define MOON_RADIUS 5
 
 int time = 0;                           // Time flow valiable       
 int who_is_active[4] = {0, 0, 0, 0};    // Round-Robin controller
+int random_break = 0;
 // :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
 
@@ -10,24 +12,27 @@ int who_is_active[4] = {0, 0, 0, 0};    // Round-Robin controller
 // Emergency reboot BIUS field
 bool reboot_BIUS = 0;
 int Emergency_tries = 0;
+bool Selfcared = 0;
 bool Max_emergency_reboot = 0;
 int after_reboot_try = 0;
 // DATA CHANNELS
-chan from_BIUS = [5] of {int}; 
+chan from_BIUS   = [5] of {int}; 
 chan from_Engine = [5] of {int};
 chan from_Others = [5] of {int};
 // COMMAND CHANNELS
-chan to_BIUS = [5] of {int};
+chan to_BIUS   = [5] of {int};
 chan to_Engine = [5] of {int};
 chan to_Others = [5] of {int};
 // :::::::::::::::::::::::::::::::::: BUS ::::::::::::::::::::::::::::::::::
 
 
+// :::::::::::::: STATISTIC ::::::::::::::
 // MODULE STATUS
-bool Engine_work = 0;
-bool BIUS_working=0;
+bool Engine_work  = 0;
+bool BIUS_working = 0;
 
-
+int Orbital_speed = 1000;
+// :::::::::::::: STATISTIC ::::::::::::::
 
 // :::::::::::::::::::::::::::::::::: BKU ::::::::::::::::::::::::::::::::::
 active proctype BKU() {
@@ -58,6 +63,7 @@ active proctype BKU() {
                     reboot_BIUS = 1;
                     to_Engine ! 0;
                     Emergency_tries++;
+
                 }
                 :: Max_emergency_reboot == 1 && after_reboot_try == 0-> {
                     to_BIUS ! 1;
@@ -68,6 +74,9 @@ active proctype BKU() {
                 }
                 :: Max_emergency_reboot == 1 && BIUS_working == 1 -> {
                     to_Engine ! 1;
+                }
+                :: Selfcared == 1 && BIUS_working == 0 ->{
+                    to_Engine ! 0;
                 }
                 :: else -> {skip;}
             fi
@@ -80,13 +89,17 @@ active proctype BKU() {
                 printf("Reading from BIUS\n");
                 int m;
                 from_BIUS ? m;
-                // very intelligence analisys
                 if
                 :: m == 0 -> {
                     zeros++;
                 }
-                :: else -> {
-                    skip;
+                :: m!=0 -> {
+                    if  // Wrong BIUS data detection
+                    :: m == (Orbital_speed / MOON_RADIUS) -> {
+                        printf("BIUS Working correctly according to Orbirtal speed\n");
+                    }
+                    :: else -> {printf("BIUS Gives wrong data using data from engine\n");}
+                    fi
                 }
                 fi
             }
@@ -150,7 +163,8 @@ active proctype BKU() {
 
 // :::::::::::::::::::::::::::::::::: BIUS ::::::::::::::::::::::::::::::::::
 active proctype BIUS() {
-    int value = 4;
+
+    int BROKEN_VALUE = 2;
     do
     :: who_is_active[1] -> {
         printf("[BIUS] Time: %d\n", time);
@@ -170,6 +184,9 @@ active proctype BIUS() {
                 :: else -> {skip;}
             fi
         }
+        :: random_break == time && BIUS_working == 1 ->{ // Random break in BIUS Case
+            BIUS_working = 0;
+        }
         :: else -> {
             do
             :: len(to_BIUS) != 0 -> {
@@ -185,6 +202,7 @@ active proctype BIUS() {
                     :: i > 2 -> { // ERROR
                         BIUS_working = 1;
                         printf("SUCCESS\n");
+                        Selfcared = 1;
                     }
                     :: else -> {
                         printf("FAILED\n");
@@ -203,7 +221,12 @@ active proctype BIUS() {
                     printf("[BIUS] Send data to BKU...\n");
                     if
                     :: BIUS_working -> {
-                        from_BIUS ! value;
+                        int i;
+                        select(i:1 .. 2)
+                        if 
+                        :: i == 1 -> {from_BIUS ! (Orbital_speed/ MOON_RADIUS);};
+                        :: else -> {from_BIUS ! BROKEN_VALUE}
+                        fi
                     }
                     :: else -> {
                         from_BIUS ! 0;
@@ -239,7 +262,6 @@ active proctype BIUS() {
 
 // :::::::::::::::::::::::::::::::::: ENGINE ::::::::::::::::::::::::::::::::::
 active proctype Engine() {
-    int Orbital_speed = 100;
     do
     :: who_is_active[2] -> {
         printf("[ENGINE] Time: %d\n", time);
@@ -281,10 +303,9 @@ active proctype Engine() {
         }
         fi
         
-        
         if
         :: Orbital_speed > 0 && Engine_work -> {// Engine is working -> slowing down
-            Orbital_speed--;
+            Orbital_speed = Orbital_speed - MOON_RADIUS;
         }
         :: else -> {skip;}
         fi
@@ -310,22 +331,19 @@ active proctype Engine() {
 
 // :::::::::::::::::::::::::::::::::: OTHERS ::::::::::::::::::::::::::::::::::
 active proctype Others() {
+    int SOME_DATA = 3242;
     do
     :: who_is_active[3] -> {
         printf("[OTHER MODULES] Time:%d\n",time);
 
         // ::::::::::: WRITING DATA :::::::::::
-        int i;
-        select(i : 1 .. 2);
-        if
-        :: i <= 1 -> {
-            printf("[OTHER MODULES] Wiriting data to BKU...\n");
-            from_Others ! i;
-        }
-        :: else -> {skip;}
+        
+        printf("[OTHER MODULES] Wiriting data to BKU...\n");
+        from_Others ! SOME_DATA;
+
+        
         // ::::::::::: WRITING DATA :::::::::::
 
-        fi
         // Changing control flow
         who_is_active[3] = 0;
         who_is_active[0] = 1;
@@ -345,14 +363,19 @@ active proctype Others() {
 }
 // :::::::::::::::::::::::::::::::::: OTHERS ::::::::::::::::::::::::::::::::::
 
-// ERROR
-// ltl success_landing{<>(Engine_work && BIUS_working && time > LANDING_TIME)};
+// Not true statement to see contrexamples
+//ltl failed{<>(Engine_work && BIUS_working && time == UNIVERSE_CRASH_TIME)};
 
-ltl success_landing{<>(Engine_work == BIUS_working && time > LANDING_TIME)};
+ltl success{<>(Engine_work == BIUS_working && time == UNIVERSE_CRASH_TIME)};
 // Successful cases:
 // CASE ENGINE_WORK:1 && BIUS_WORK:1 -> Successfull landing
 // CASE ENGINE_WORK:0 && BIUS_WORK:0 -> Emergency engine off (BIUS defect detection) (HYPERNARION)
 
 init { // Initializing round-robin process
     who_is_active[0] = 1;
+    select(random_break : LANDING_TIME .. LANDING_TIME + 15); // In pre
+    if
+        :: random_break == LANDING_TIME -> {random_break = 0;};
+        :: else -> {skip;}
+    fi
 }
