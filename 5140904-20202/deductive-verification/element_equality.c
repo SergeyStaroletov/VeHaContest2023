@@ -11,4 +11,4 @@ int element_equality(int *a, int n){
 	}
     return result;
 }
-/* */
+/* (= (element-equality 0 (- n 1) a) result) */
