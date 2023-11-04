@@ -122,5 +122,4 @@ init {
 }
 
 
-// ltl { [](BIUS_STATE == RESET && enable_transfered == true) -> []<>(BIUS_STATE == WORK) }
-ltl { []<>(STATION_STATE == IN_ELLIPTICAL_ORBIT) }
+ltl { [](BIUS_STATE == RESET && enable_transfered == true) -> []<>(BIUS_STATE == WORK) }
