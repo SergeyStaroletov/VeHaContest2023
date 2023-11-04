@@ -1,8 +1,8 @@
-#define N 5
+#define N 3
 #define NULL_SIGNAL 0
-#define FINAL_ANGLE_SPEED 5
-#define FINAL_SPEED 5
-#define COUNT_FOR_LANDING 7
+#define FINAL_ANGLE_SPEED 3
+#define FINAL_SPEED 3
+#define COUNT_FOR_LANDING 2
 
 #define COMMAND_TURNING_ON 1
 #define COMMAND_TURNING_OFF 2
@@ -32,6 +32,7 @@ inline clearChannel(channel) { // Метод для очистки канала 
 
 // Компонент БКУ
 active proctype BKU() {
+  bit shoulBeLanding = 1;
   bit isLanding = 0; // Поступила ли заявка на посадку
   bit isOnOrbit = 0; // Поступили ли данные для перехода на эллиптическую орбиту
   byte angleSpeed;  // Угловая скорость от БИУС-Л
@@ -40,17 +41,22 @@ active proctype BKU() {
   
   do
   :: atomic {
+  nextComponent == BKU_NUM ->
     if 
-	:: (countForLanding < COUNT_FOR_LANDING) ->
+	:: (countForLanding < COUNT_FOR_LANDING) -> {
 		countForLanding = countForLanding + 1;
-	:: (countForLanding == COUNT_FOR_LANDING && isLanding == 0) -> 
+		nextComponent = 0;
+	}
+	:: (countForLanding == COUNT_FOR_LANDING && shoulBeLanding == 1) ->  {
 		isLanding = 1;
-	fi
+		shoulBeLanding = 0;
+		nextComponent = 0;
+	}
   
     // Если наступила очередь опроса БКУ и есть запрос на посадку, а также каналы команд БИУС-Л и двигателя не заполнены,
 	// то через каналы оправляем команды включения соответствующим модулям и делаем шаг на следующий по очереди компонент
-    if 
-	:: (nextComponent == BKU_NUM && isLanding == 1 && len(biusCommands) < N && len(engineCommands) < N) -> {
+
+	:: (isLanding == 1 && len(biusCommands) < N && len(engineCommands) < N) -> {
 		biusCommands ! COMMAND_TURNING_ON;
 		engineCommands ! COMMAND_TURNING_ON;
 		nextComponent = 0;
@@ -58,7 +64,7 @@ active proctype BKU() {
 	} 
 	// Если наступила очередь опроса БКУ и поступили данные для перехода на эллиптическую орбиту, а также каналы команд БИУС-Л и двигателя не заполнены,
 	// то через каналы оправляем команды выключения соответствующим модулям и делаем шаг на следующий по очереди компонент
-	:: (nextComponent == BKU_NUM && isOnOrbit == 1 && len(biusCommands) < N && len(engineCommands) < N) -> {
+	:: (isOnOrbit == 1 && len(biusCommands) < N && len(engineCommands) < N) -> {
 		biusCommands ! COMMAND_TURNING_OFF;
 		engineCommands ! COMMAND_TURNING_OFF;
 		nextComponent = 0;
@@ -70,26 +76,26 @@ active proctype BKU() {
 		biusCommands ! COMMAND_TURNING_ON;
 		nextComponent = 0;
 	}
-	fi
-	
+
 	// Если наступила очередь опроса БКУ и каналы команд БИУС-Л и двигателя не заполнены, то через каналы пытаемся получить данные, 
 	// при искомых значениях скорости и угловой скорости обновляем значение isOnOrbit и делаем шаг на следующий по очереди компонент
-	if
-	:: (nextComponent == BKU_NUM && (len(biusData) > 0 || len(engineData) > 0)) -> {
+	:: ((len(biusData) > 0 || len(engineData) > 0)) -> {
 		if
 		:: (len(biusData) > 0) -> 
 			biusData ? angleSpeed;
 		:: (len(engineData) > 0) -> 
 			engineData ? speed;
+		:: true -> skip;
 		fi
 		
 		if
 		:: (angleSpeed == FINAL_ANGLE_SPEED && speed == FINAL_SPEED) ->
 			isOnOrbit = 1;
+		:: true -> skip;
 		fi
 		nextComponent = 0;
 	}
-	:: (nextComponent == BKU_NUM) -> nextComponent = 0;
+	:: else -> nextComponent = 0;
 	fi
   }
   od
@@ -102,10 +108,11 @@ active proctype BIUSL() {
   
   do
   :: atomic {
+  nextComponent == BIUSL_NUM ->
     // Если наступила очередь опроса БИУС-Л и он выключен, а также канал его команд не пуст,
 	// то через канал читаем команду, делаем шаг на следующий по очереди компонент, если получили команду включения, обновляем переменные
     if
-	:: (isBiuslTurnedOn == 0 && nextComponent == BIUSL_NUM && len(biusCommands) > 0) -> {
+	:: (isBiuslTurnedOn == 0 && len(biusCommands) > 0) -> {
 		biusCommands ? command;
 		nextComponent = nextComponent + 1;
 		if 
@@ -113,13 +120,14 @@ active proctype BIUSL() {
 			isBiuslTurnedOn = 1;
 			biusShouldBeReloaded = 0;
 		}
+		:: true -> skip;
 		fi
 	}
 	// Если наступила очередь опроса БИУС-Л и он включен, а также канал его команд не пуст,
 	// то через канал читаем команду, делаем шаг на следующий по очереди компонент, если получили команду выключения, обновляем переменную,
 	// если получили команду перезагрузки, обновляем переменные, очищаем канал команд БИУС-Л, после чего добавляя сигнал включения
 	// (который мог быть утерян во время очищения канала)
-	:: (isBiuslTurnedOn == 1 && nextComponent == BIUSL_NUM && len(biusCommands) > 0) -> {
+	:: (isBiuslTurnedOn == 1 && len(biusCommands) > 0) -> {
 		biusCommands ? command;
 	    nextComponent = nextComponent + 1;
 		if 
@@ -132,33 +140,32 @@ active proctype BIUSL() {
 			clearChannel(biusCommands);
 			biusCommands ! COMMAND_TURNING_ON;
 		}
+		:: true -> skip;
 		fi
 	}
-	fi
 	
 	// Если наступила очередь опроса БИУС-Л и он выключен, а также канал его данных не заполнен,
 	// то передаем нулевой сигнал и делаем шаг на следующий по очереди компонент
-	if
-	:: (isBiuslTurnedOn == 0 && nextComponent == BIUSL_NUM && len(biusData) < N) -> {
+
+	:: (isBiuslTurnedOn == 0 && len(biusData) < N) -> {
 		biusData ! NULL_SIGNAL;
 		nextComponent = nextComponent + 1;
 	}
 	// Если наступила очередь опроса БИУС-Л и он включен, а также канал его данных не заполнен,
 	// то передаем значение угловой скорости по каналу и делаем шаг на следующий по очереди компонент, 
 	// а также обновляем угловую скорость (считаем, что в этот момент получаем данные от датчика)
-	:: (isBiuslTurnedOn == 1 && nextComponent == BIUSL_NUM && len(biusData) < N) -> {
+	:: (isBiuslTurnedOn == 1 && len(biusData) < N) -> {
 	    nextComponent = nextComponent + 1;
 		biusCommands ! angleSpeed;
 		if
 		:: (angleSpeed < FINAL_ANGLE_SPEED) -> 
 			angleSpeed = angleSpeed + 1;
+		:: true -> skip;
 		fi
 	}
-	fi
 	
 	// Если наступила очередь опроса БИУС-Л и он не может получить или передать информацию, делаем шаг на следующий по очереди компонент
-	if
-	:: (nextComponent == BIUSL_NUM) ->
+	:: else ->
 		nextComponent = nextComponent + 1;
 	fi
   }
@@ -173,39 +180,41 @@ active proctype Engine() {
   
   do
   :: atomic {
+  nextComponent == ENGINE_NUM ->
     // Если наступила очередь опроса двигателя и он выключен, а также канал его команд не пуст,
 	// то через канал читаем команду, делаем шаг на следующий по очереди компонент, если получили команду включения, обновляем соответствующую переменную
     if
-	:: (isTurnedOn == 0 && nextComponent == ENGINE_NUM && len(engineCommands) > 0) -> {
+	:: (isTurnedOn == 0 && len(engineCommands) > 0) -> {
 		engineCommands ? command;
 		nextComponent = nextComponent + 1;
 		if 
 		:: (command == COMMAND_TURNING_ON) ->
 			isTurnedOn = 1;
+		:: true -> skip;
 		fi
 	}
 	// Если наступила очередь опроса двигателя и он включен, а также канал его команд не пуст,
 	// то через канал читаем команду, делаем шаг на следующий по очереди компонент, если получили команду выключения, обновляем соответствующую переменную
-	:: (isTurnedOn == 1 && nextComponent == ENGINE_NUM && len(engineCommands) > 0) -> {
+	:: (isTurnedOn == 1 && len(engineCommands) > 0) -> {
 		engineCommands ? command;
 	    nextComponent = nextComponent + 1;
 		if 
 		:: (command == COMMAND_TURNING_OFF) ->
 			isTurnedOn = 0;
+		:: true -> skip;
 		fi
 	}
-	fi
 	
 	// Если наступила очередь опроса двигателя и он включен, а также канал его данных не заполнен,
 	// то передаем значение скорости по каналу и делаем шаг на следующий по очереди компонент, 
 	// а также обновляем скорость
-	if
-	:: (isTurnedOn == 1 && nextComponent == ENGINE_NUM && len(engineData) < N) -> {
+	:: (isTurnedOn == 1 && len(engineData) < N) -> {
 	    nextComponent = nextComponent + 1;
 		engineData ! speed;
 		if
 		:: (speed < FINAL_SPEED) -> 
 			speed = speed + 1;
+		:: true -> skip;
 		fi
 	}
 	// Если наступила очередь опроса двигателя и он не может получить или передать информацию, делаем шаг на следующий по очереди компонент
