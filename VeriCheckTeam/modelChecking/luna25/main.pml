@@ -1,5 +1,7 @@
-#define queueSize 4
-#define targetBiusAngle 5
+#define QUEUE_SIZE 4
+#define TARGET_BIUS_ANGLE 5 // Угол, при котором манёвр считается завершенным и отправляются команды на выключение BIUS и ENGINE 
+#define MAX_SKIP_COUNT 10 // Для оптимизации, максимальное число раундов, когда устройство может быть не готово к приёму/передаче.
+
 #define NIL_bius 0 // передача нуля от выключенного bius
 
 inline clearChan(chanName) {
@@ -11,7 +13,7 @@ inline clearChan(chanName) {
 
 inline resetChanIfAroundLimit(chanData, chanCommand) {
   if
-    :: (len(chanData) == (queueSize - 1)) -> chanCommand ! reset;
+    :: (len(chanData) == (QUEUE_SIZE - 1)) -> chanCommand ! reset;
     :: else -> skip;
   fi
 }
@@ -40,18 +42,18 @@ byte simulationState = 0;
 // Указывает какой модуль имеет право на приём/передачу по round-robin
 chan currentTurn = [0] of { mtype };
 
-chan BIUS_DATA = [queueSize] of { byte };
-chan ENGINE_DATA = [queueSize] of { byte };
-chan MODULE_DATA = [queueSize] of { byte };
+chan BIUS_DATA = [QUEUE_SIZE] of { byte };
+chan ENGINE_DATA = [QUEUE_SIZE] of { byte };
+chan MODULE_DATA = [QUEUE_SIZE] of { byte };
 
-chan BIUS_COMMAND = [queueSize] of { mtype };
-chan ENGINE_COMMAND = [queueSize] of { mtype };
-chan MODULE_COMMAND = [queueSize] of { mtype };
+chan BIUS_COMMAND = [QUEUE_SIZE] of { mtype };
+chan ENGINE_COMMAND = [QUEUE_SIZE] of { mtype };
+chan MODULE_COMMAND = [QUEUE_SIZE] of { mtype };
 
 bool isEngineEnabled = false;
 bool isBiusEnabled = false;
 
-bool isBugFound = false;
+bool isBiusEnableCommandSend = false;
 
 active proctype ROUNDROBIN() {
   do
@@ -84,7 +86,7 @@ active proctype BKU() {
           BIUS_DATA ? bius_data; 
           printf("MSC: angle %d\n", bius_data)
           if 
-            :: bius_data == targetBiusAngle -> {
+            :: bius_data == TARGET_BIUS_ANGLE -> {
               ENGINE_COMMAND ! disable_engine;
               BIUS_COMMAND ! disable_bius;
               simulationState = 2;
@@ -103,14 +105,9 @@ active proctype BKU() {
           simulationState = 1;
           BIUS_COMMAND ! enable_bius;
           ENGINE_COMMAND ! enable_engine;
+          isBiusEnableCommandSend = true;
         }
         :: true -> skip;
-        progress: { // TODO: возможно плохая идея
-          if
-            ::simulationState == 0 -> goto START
-            else -> skip;
-          fi
-        };
       fi
 
       // Переход на эллиптическую орбиту завершён
@@ -129,23 +126,20 @@ active proctype BKU() {
 active proctype BIUS() {
   bool enable = false;
   byte angle = 0;
+  byte skipCount = 0;
 
   do
   :: atomic {
     currentTurn ? bius -> { printf("BIUS\n"); }
 
-    if
-      :: BIUS_DATA ?? [reset] && BIUS_DATA ?? [enable_bius] -> { isBugFound = true };
-      :: else -> skip;
-    fi
-
     clearChanAfterResetCommand(BIUS_DATA, BIUS_COMMAND);
 
     if
-      :: BIUS_COMMAND ? enable_bius -> { enable = true; isBiusEnabled = true; }
-      :: BIUS_COMMAND ? disable_bius -> { enable = false; isBiusEnabled = false; }
-      // :: true -> printf("BIUS: SKIP\n"); // TODO: fix, через эту штуку вечный цикл случается, надо сделать не :: true, а skipCount < MAX_SKIP_COUNT
+      :: BIUS_COMMAND ? enable_bius -> { enable = true; isBiusEnabled = true; skipCount = 0; }
+      :: BIUS_COMMAND ? disable_bius -> { enable = false; isBiusEnabled = false; skipCount = 0; }
+      :: (skipCount < MAX_SKIP_COUNT) -> skipCount++;
       :: true -> {
+        skipCount = 0;
         if 
           :: enable -> {
             if
@@ -164,6 +158,7 @@ active proctype BIUS() {
 
 active proctype ENGINE() {
   bool enable = false;
+  byte skipCount = 0;
 
   do
   :: atomic {
@@ -172,12 +167,12 @@ active proctype ENGINE() {
     clearChanAfterResetCommand(ENGINE_DATA, ENGINE_COMMAND);
 
     if
-      :: ENGINE_COMMAND ? [disable_engine] -> { ENGINE_COMMAND ? disable_engine; enable = false; isEngineEnabled = false; };
-      :: ENGINE_COMMAND ? [enable_engine] -> { ENGINE_COMMAND ? enable_engine; enable = true; isEngineEnabled = true; };
+      :: ENGINE_COMMAND ? [disable_engine] -> { ENGINE_COMMAND ? disable_engine; enable = false; isEngineEnabled = false; skipCount = 0; };
+      :: ENGINE_COMMAND ? [enable_engine] -> { ENGINE_COMMAND ? enable_engine; enable = true; isEngineEnabled = true; skipCount = 0; };
       :: enable -> {
         if
-          :: true -> ENGINE_DATA ! 1;
-          :: true -> skip;
+          :: true -> ENGINE_DATA ! 1; skipCount = 0;
+          :: (skipCount < MAX_SKIP_COUNT) -> skipCount++;
         fi
       };
       :: else -> skip;
@@ -187,6 +182,8 @@ active proctype ENGINE() {
 }
 
 active proctype MODULE() {
+  byte skipCount = 0;
+
   do
     :: atomic {
       currentTurn ? module -> { printf("MODULE\n"); }
@@ -194,15 +191,19 @@ active proctype MODULE() {
       clearChanAfterResetCommand(MODULE_DATA, MODULE_COMMAND);
       
       if
-        :: MODULE_COMMAND ? _ -> { skip; }
-        :: true -> { MODULE_DATA ! 1; }
-        :: true -> { skip; }
+        :: MODULE_COMMAND ? _ -> { skip; skipCount = 0 }
+        :: true -> { MODULE_DATA ! 1; skipCount = 0  }
+        :: (skipCount < MAX_SKIP_COUNT) -> skipCount++;
       fi
     }
   od
 }
 
-ltl p1 { <> [] (simulationState == 3) };
+// Есть шанс, что если мы начнём манёвр, то мы его корректно закончим
+ltl p1 { ((simulationState == 1) -> <> (simulationState == 3 && !isEngineEnabled && !isBiusEnabled)) };
 
-// TODO: написать условие, чтоб найти именно наш баг: случится ресет который потрёт команду на запуск
-ltl p2 { []<> !isBugFound }
+// Но не ВСЕГДА (верификация завершается ошибкой с контрпримером)
+ltl p2 { [] ((simulationState == 1) -> <> (simulationState == 3 && !isEngineEnabled && !isBiusEnabled)) };
+
+// Всегда если команда на включение BIUS была отправлена, то он включится. Тот самый баг из описания. Демонстрирует как команда reset перебивает команду enable_bius
+ltl p3 { [] (isBiusEnableCommandSend -> <> isBiusEnabled) };
