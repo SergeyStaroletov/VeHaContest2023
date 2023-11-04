@@ -1,6 +1,6 @@
 #define QUEUE_SIZE 4
 #define TARGET_BIUS_ANGLE 5 // Угол, при котором манёвр считается завершенным и отправляются команды на выключение BIUS и ENGINE 
-#define MAX_SKIP_COUNT 10 // Для оптимизации, максимальное число раундов, когда устройство может быть не готово к приёму/передаче.
+#define MAX_SKIP_COUNT 2 // Для оптимизации, максимальное число раундов, когда устройство может быть не готово к приёму/передаче.
 
 #define NIL_bius 0 // передача нуля от выключенного bius
 
@@ -79,7 +79,7 @@ active proctype BKU() {
       resetChanIfAroundLimit(ENGINE_DATA, ENGINE_COMMAND);
       resetChanIfAroundLimit(MODULE_DATA, MODULE_COMMAND);
 
-      if
+      do
         :: MODULE_DATA ? [module_data] -> { MODULE_DATA ? module_data; printf("BKU: MODULE_DATA %e\n", module_data) };
         :: ENGINE_DATA ? [engine_data] -> { ENGINE_DATA ? engine_data; printf("BKU: ENGINE_DATA %e\n", engine_data) };
         :: BIUS_DATA ? [bius_data] -> { 
@@ -95,8 +95,8 @@ active proctype BKU() {
             :: else -> skip;
           fi
         };
-        :: else -> skip;
-      fi
+        :: else -> break;
+      od
 
       // Переход на эллиптическую орбиту
       if
@@ -134,6 +134,8 @@ active proctype BIUS() {
 
     clearChanAfterResetCommand(BIUS_DATA, BIUS_COMMAND);
 
+// TODO: Вот тут вот случается цикл по последнему ::true, и команды не обрабатываются НИКОГДА. Нужно либо найти как тут прописывают Fairness, либо добавить какой нибудь детерминизм в приём команд. Можно спросить в тг как fairness прописать. (это в нусмв было чтоб явно указать, что цикл не вечный)
+// То есть у нас приоритета приёма команд/отправки данных нет, как и писали в тг, но нужно всё равно, чтоб команды когда то обработались, а не сидели вечно
     if
       :: BIUS_COMMAND ? enable_bius -> { enable = true; isBiusEnabled = true; skipCount = 0; }
       :: BIUS_COMMAND ? disable_bius -> { enable = false; isBiusEnabled = false; skipCount = 0; }
