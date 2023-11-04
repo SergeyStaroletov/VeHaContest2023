@@ -188,7 +188,7 @@ active proctype ENGINE() {
     if
       :: ENGINE_COMMAND ? [disable_engine] -> { ENGINE_COMMAND ? disable_engine; enable = false; isEngineEnabled = false; skipCount = 0; skipCountCommand = 0;};
       :: ENGINE_COMMAND ? [enable_engine] -> { ENGINE_COMMAND ? enable_engine; enable = true; isEngineEnabled = true; skipCount = 0; skipCountCommand = 0;};
-      :: skipCountCommand < MAX_SKIP_COUNT_COMMAND && enable -> {
+      :: enable && (skipCountCommand < MAX_SKIP_COUNT_COMMAND) -> {
         countChanEmpty(ENGINE_COMMAND, skipCountCommand)
         if
           :: true -> ENGINE_DATA ! 1; skipCount = 0;
